@@ -11,6 +11,38 @@
 #include <assert.h>
 
 #define BLOCK_SIZE 16
+/*
+*********************************************************************
+function name: matrix_mult
+
+description: adding of two matrix 
+
+parameters: 
+            &a GPU device pointer to a m X n matrix (A)
+            &b GPU device pointer to a m X n matrix (B)
+            &c GPU device output purpose pointer to a m X n matrix (C) 
+            to store the result
+
+Note:
+    grid and block should be configured as:
+        	unsigned int grid_rows = (m + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    		unsigned int grid_cols = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    		dim3 dimGrid(grid_cols, grid_rows);
+    		dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+    call the function
+		matrix_add<<< dimGrid, dimBlock >>>(d_a, d_b, d_c, n, m);
+
+*********************************************************************
+*/
+__global__ void matrix_add(int *a, int *b, int *c, int n, int m)
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y; 
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int index = row * n + col;
+	if (col < n && row < m)
+		c[index] = a[index] + b[index];
+
+}
 
 /*
 *********************************************************************
