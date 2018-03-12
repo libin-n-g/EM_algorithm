@@ -11,6 +11,85 @@
 #include <assert.h>
 
 #define BLOCK_SIZE 16
+
+// Max Dimension of input square matrix
+#define N 4
+ 
+// Function to get cofactor of mat[p][q] in temp[][]. n is current
+// dimension of mat[][]
+__global__ void getCofactor(float *mat, float *temp, int p, int q, int n)
+{
+//    int i = 0, j = 0;
+	int row = blockIdx.x;
+	int col = threadIdx.x;
+ 	int index = blockIdx.x * blockDim.x + threadIdx.x;
+    // Looping for each element of the matrix
+    //for (int row = 0; row < n; row++)
+    //{
+      //  for (int col = 0; col < n; col++)
+        //{
+            //  Copying into temporary matrix only those element
+            //  which are not in given row and column
+            if (row != p && col != q)
+            {	
+            	if (row > p)
+            		row = row - 1;
+            	if (col > q)
+            		col = col -1; 
+                temp[row *n + col] = mat[index];
+ 		//		j++;
+                // Row is filled, so increase row index and
+                // reset col index
+      //          if (j == n - 1)
+          //      {
+            //        j = 0;
+              //      i++;
+                }
+          //  }
+        //}
+    //}
+}
+ 
+/* Recursive function for finding determinant of matrix.
+   n is current dimension of mat[][]. 
+   This code can be parallelised by removing the loops
+   */
+float determinantOfMatrix(float *mat,  int n)
+{
+    float D = 0; // Initialize result
+ 
+    //  Base case : if matrix contains single element
+    if (n == 1)
+        return mat[0];
+ 	
+    float *d_temp, *d_M; // To store cofactors
+    float *temp;
+    printf("%f\n", mat[3]);
+    temp = (float *)malloc(N*N*sizeof(float));
+	cudaMalloc((void **)&d_M, N*N*sizeof(float));
+ 	cudaMalloc((void **)&d_temp, N*N*sizeof(float));
+ 	cudaMemcpy(d_M, mat, N*N*sizeof(float), cudaMemcpyHostToDevice);
+    int sign = 1;  // To store sign multiplier
+ 
+     // Iterate for each element of first row
+    for (int f = 0; f < n; f++)
+    {
+        // Getting Cofactor of mat[0][f]
+        getCofactor<<< n, n>>>(d_M, d_temp, 0, f, n);
+        cudaMemcpy(temp, d_temp, N*N*sizeof(float), cudaMemcpyDeviceToHost);
+        printf("temp %f\n", temp[0]);
+        D += sign * mat[f] * determinantOfMatrix(temp, n - 1);
+ 		printf("%f %f\n", D, mat[f]);
+        // terms are to be added with alternate sign
+        sign = -sign;
+    }
+ 	cudaFree(d_temp);
+ 	cudaFree(d_M);
+ 	free(temp);
+    return D;
+}
+
+
 /*
 *********************************************************************
 function name: matrix_mult
