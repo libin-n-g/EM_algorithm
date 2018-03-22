@@ -2,7 +2,7 @@
  * gmmEm.cu
  *
  *  Created on: 17-Mar-2018
- *      Author: libin
+ *      Author: libin,axel
  */
 
 //#include <arrayfire.h>
@@ -69,13 +69,14 @@ __device__ double square(double x){
  * d -> dimension of data(feature) == D
  * X -> T * D Matrix of input (stored as one dimensional)
  * gamma -> M * N array (N -> number of data points) (responsibility )
+ * gamma_hat -> M * N array (N -> number of data points) 
  * mu -> M -dimensional array (M components)
  * sigma -> M * D dimensional array ( each row represents diagonal coefficients for each sigma)
  * w -> M dimensional array (mixing coefficient)
  * M -> number of components
  */
 
-__global__ void calc_gamma(double * X, double * gamma, double* mu,
+__global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 		double* sigma, double* w, int d, int M){
     __shared__ double x[QT][100]; //assuming d < 100
     int id_x = blockIdx.x;
@@ -119,9 +120,46 @@ __global__ void calc_gamma(double * X, double * gamma, double* mu,
         gamma_[i] = gamma_[i]+total;
     }
     for (int k = 0; k < QT; ++k) {
-    	gamma[m*QM + k] = gamma_[k];
+    	gamma_hat[m*QM + k] = gamma_[k];
 	}
 }
+
+/* 
+* normalize gamma
+* total threads = S1 i.e number of classes to which X is divided
+* each thread normalizes QT feature vector gammas   
+*/
+__global__ void normilize(double * gamma, int M){
+	int id_x = blockIdx.x;
+	double total;
+	int temp;
+	for (int i = 0; i < QT; ++i) {
+		total=0;
+		temp=id_X*Qt*M+M*i;
+    	for (int j = 0; j < M; ++j) {
+    		total=total+gamma[temp+j];
+		}
+		for (int j = 0; j < M; ++j) {
+    		gamma[temp+j]=gamma[temp+j]/temp;
+		}
+	}
+}
+
+__global__ void calc_likelihood(double * gamma, double * gamma_hat){
+	int id_x = blockIdx.x;
+	double total;
+	for (int i = 0; i < QT; ++i) {
+		total=0;
+		temp=id_X*Qt*M+M*i;
+    	for (int j = 0; j < M; ++j) {
+    		total=total+gamma_hat[temp+j];
+		}
+		for (int j = 0; j < M; ++j) {
+    		gamma[temp+j]=exp(gamma_hat[temp+j]-total);
+		}
+	}
+}
+
 int main(int argc, char **argv) {
 	float *M = NULL;
 	float x = 0;
