@@ -14,9 +14,9 @@
 #include "matrix.cuh"
 //using namespace af;
 
-#define QD 10
-#define QM 10
-#define QT 10
+#define QD 4
+#define QM 32
+#define QT 8
 #define S1 10
 #define S2 10
 #define S3 10
@@ -62,6 +62,66 @@ __global__  void eps_kernal(double* O, double *respon,
     __syncthreads();
 }
 
+__device__ double square(double x){
+    return x*x;
+}
+/*
+ * d -> dimension of data(feature) == D
+ * X -> T * D Matrix of input (stored as one dimensional)
+ * gamma -> M * N array (N -> number of data points) (responsibility )
+ * mu -> M -dimensional array (M components)
+ * sigma -> M * D dimensional array ( each row represents diagonal coefficients for each sigma)
+ * w -> M dimensional array (mixing coefficient)
+ * M -> number of components
+ */
+
+__global__ void calc_gamma(double * X, double * gamma, double* mu,
+		double* sigma, double* w, int d, int M){
+    __shared__ double x[QT][100]; //assuming d < 100
+    int id_x = blockIdx.x;
+    int id_y = blockIdx.y;
+    // Coping to Shared Memory
+    for (int i = 0; i < QT; ++i) {
+    	for (int j = 0; j < d; ++j) {
+    		x[i][j] = X[(id_x + i)* QT  + j];
+		}
+	}
+
+    int i,j;
+    double total;
+
+    int temp = id_x * QT * d;
+
+    int m = blockIdx.y * QM + threadIdx.y;
+    double gamma_[QT];
+    // NOTE : assuming diagonal variance matrix
+    double det = 1;
+    for (int i = 0; i < d; ++i) {
+		det = det * sigma[ d*m + i];
+	}
+    double Gm = log(w[m]) + 0.39909*d + 0.5*log(det);
+//    for(i=0;i<Qt;i++){
+//        for(j=0;j<d;j++){
+//            x[i*d+j]=X[temp+i*d+j];
+//        }
+//    }
+    __syncthreads();
+
+    for(i=0;i<QT;i++){
+        gamma_[i] = Gm;
+    }
+
+    for(i=0;i<QT;i++){
+        total=0;
+        for(j=0;j< d;j++){
+            total = total+square(x[i][j]-mu[m*d+j])/square(sigma[m*d+j]);
+        }
+        gamma_[i] = gamma_[i]+total;
+    }
+    for (int k = 0; k < QT; ++k) {
+    	gamma[m*QM + k] = gamma_[k];
+	}
+}
 int main(int argc, char **argv) {
 	float *M = NULL;
 	float x = 0;
