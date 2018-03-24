@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cuda.h>
 #include "common.h"
 #include "matrix.cuh"
 //using namespace af;
@@ -17,19 +18,21 @@
 #define QD 4
 #define QM 32
 #define QT 8
-#define S1 10
-#define S2 10
-#define S3 10
-/*
- * M*D number of blocks
+
+/* S2 * S3 GRID
+ * X => T * D Matrix of input (stored as one dimensional)
+ * respon => M * T Matrix which store posterior (responsibility matrix)
+ * dim => dimension of Input data
+ * n => number of datapoints
+ * eps => M * D matrix containing first moments
+ * eps_sq => M * D matrix containing second moments
+ * S1 =>
  */
-__global__  void eps_kernal(double* O, double *respon,
-		int dim, int n, double* eps, double* eps_sq, double* c)
+__global__  void eps_kernal(double* X, double *respon,
+		int dim, int n, double* eps, double* eps_sq, double* c, int S1)
 {
 	int j_ = blockIdx.y;
-	//int i_ = blockIdx.x;
 	int del_j = j_ * QD;
-	//int row =  threadIdx.y;
     int m = blockIdx.x * blockDim.x + threadIdx.x;
     double c_m = 0;
     double eps_[QD];
@@ -42,7 +45,7 @@ __global__  void eps_kernal(double* O, double *respon,
     for (int q = 0; q < S1; ++q) {
     	for (int i = 0; i < QT; ++i) {
     		for (int j = 0; j < QD; ++j) {
-    			o[i][j] = O[(q*QT + i)*dim + del_j + j];
+    			o[i][j] = X[(q*QT + i)*dim + del_j + j];
 			}
 		}
 //#pragma unroll
@@ -66,6 +69,7 @@ __device__ double square(double x){
     return x*x;
 }
 /*
+ * S1 * S2 GRID
  * d -> dimension of data(feature) == D
  * X -> T * D Matrix of input (stored as one dimensional)
  * gamma -> M * N array (N -> number of data points) (responsibility )
@@ -135,7 +139,7 @@ __global__ void normilize(double * gamma, int M){
 	int temp;
 	for (int i = 0; i < QT; ++i) {
 		total=0;
-		temp=id_X*QT*M+M*i;
+		temp=id_x*QT*M+M*i;
     	for (int j = 0; j < M; ++j) {
     		total=total+gamma[temp+j];
 		}
@@ -148,9 +152,10 @@ __global__ void normilize(double * gamma, int M){
 __global__ void calc_likelihood(double * gamma, double * gamma_hat,int M){
 	int id_x = blockIdx.x;
 	double total;
+	int temp;
 	for (int i = 0; i < QT; ++i) {
 		total=0;
-		temp=id_X*QT*M+M*i;
+		temp=id_x*QT*M+M*i;
     	for (int j = 0; j < M; ++j) {
     		total=total+gamma_hat[temp+j];
 		}
@@ -159,82 +164,85 @@ __global__ void calc_likelihood(double * gamma, double * gamma_hat,int M){
 		}
 	}
 }
+/*
+ * Structure for returning data from file
+ */
+struct Inputdata {
+	double * X;
+	int n;
+	int d;
+};
+/*
+ * READS FILE FOR INPUT DATA
+ * FILE FORMAT (n => number of points , d => dimension of each point)
+ * n d
+ * x_11 ..... x_1d
+ * .
+ * .
+ * x_n1 ..... x_nd
+ */
 
+struct Inputdata read_file (const char* file_name)
+{
+  FILE* file = fopen (file_name, "r");
+  check(file, "File %s could not be opened \n", file_name);
+  int n, d;
+  fscanf (file, "%d %d", &n, &d);
+  double *X;
+  X = (double *)calloc(n*d, sizeof(double));
+  check(X, "Memory allocation for X(Input Data) failed");
+  int i = 0;
+  while (!feof (file)){
+	  for (int j = 0; j < d; ++j) {
+		  fscanf (file, "%d", &X[i*d + j]);
+	  }
+	  i++;
+  }
+  check((i >= n), "Error in reading Data \n Please check the data format\n");
+  struct Inputdata ret;
+  ret.X = X;
+  ret.n = n;
+  ret.d = d;
+  fclose (file);
+  return ret;
+}
+/*
+ * Format of argv
+ * <input filename>  <number of clusters>
+ */
 int main(int argc, char **argv) {
-	FILE *fp;
-	int M;
 	double X[5000][50];
-	//float *M = NULL;
-	float x = 0;
-
+	check(argc > 1, "Please give Input Filename as first argument \n");
+	check(argc > 2, "Please give number of clusters as second argument \n");
+	int M = atoi(argv[2]);
 	//File processing
-	fp = fopen(argv[1], "r");
-	if (fp == NULL)
-    {
-        printf("Could not open file %s", filename);
-        return 0;
-	}
-	int i=0;
-	int j=0;
-	while(1){
-		fscanf(fp, "%lf", X[i][j]);
-		c = getc(fp);
-		if(c==EOF){
-			break;
-		} else if(c=='\n'){
-			i++;
-			j=0;
-		} else if(c==','){
-			j++;
-		}
-	}
-	int n=i+1;
-	int d=j+1;
-
-	// M = (float *)malloc(9 * sizeof(float));
-	// for (int i = 0; i < 3; ++i) {
-	// 	for (int j = 0; j < 3; ++j) {
-	// 		if (i==j)
-	// 			M[i*3  + j]=1;
-	// 		else
-	// 			M[i*3  + j]=j;
-	// 	}
-	// }
-	// for (int i = 0; i < 3; ++i) {
-	// 	for (int j = 0; j < 3; ++j) {
-	// 		printf("%f\t", M[i*3  + j]);
-	// 	}
-	// 	printf("\n");
-	// }
-
-	// //af_det(&x,&y,M);
-	// x = determinant(M,3);
-	// printf("DET = %f", x);
-	//--------------------------------------------
+	struct Inputdata input = read_file(argv[1]);
+	int D = input.d;
+	int N = input.n;
 
 	double *d_gamma, *d_X, *d_gamma_hat, *d_w, *d_sigma, *d_mu;
-	int n_block_x = ceil(n*1.0/QT);
+	int n_block_x = ceil(N*1.0/QT);
     int n_block_y = ceil(M*1.0/QM);
-	cudaMalloc((void **)&d_gamma, n*m* sizeof(double));
-	cudaMalloc((void **)&d_X, n*d* sizeof(double));
-	cudaMalloc((void **)&d_gamma_hat, n*m* sizeof(double));
-	cudaMalloc((void **)&d_w, m* sizeof(double));
-	cudaMalloc((void **)&d_mu, m*d* sizeof(double));
-	cudaMalloc((void **)&d_sigma, m*d* sizeof(double));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_gamma, sizeof(double) * N *M));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_X, N*D* sizeof(double)));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_gamma_hat, N*M* sizeof(double)));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_w, M* sizeof(double)));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_mu, M*D* sizeof(double)));
+	CUDA_SAFE_CALL(cudaMalloc((void **)&d_sigma, M*D* sizeof(double)));
 
     dim3 dimBlock(n_block_x,n_block_y);
-    cudaMemcpy(d_X, X, n * D * sizeof(double), cudaMemcpyHostToDevice);
-    calc_log_gamma<<<dimBlock,QM,sizeof(float)*d*Qt>>>(d_X,d_gamma_hat,d_mu,d_sigma,d,M);
+    CUDA_SAFE_CALL(cudaMemcpy(d_X, X, N * D * sizeof(double), cudaMemcpyHostToDevice));
+    
+    calc_log_gamma<<<dimBlock,QM,sizeof(float)*D*QT>>>(d_X,d_gamma, d_mu, d_sigma, d_w, D, M);
 	calc_likelihood<<<n_block_x,QT>>>(d_gamma, d_gamma_hat, M);
-	normilize<<<n_block_x,QT>>>(d_gamma,M)
-
+	normilize<<<n_block_x,QT>>>(d_gamma,M);
 	
-	cudaFree(d_gamma);
-	cudaFree(d_X);
-	cudaFree(d_gamma_hat);
-	cudaFree(d_w);
-	cudaFree(d_mu);
-	cudaFree(d_sigma);
+	CUDA_SAFE_CALL(cudaFree(d_gamma));
+	CUDA_SAFE_CALL(cudaFree(d_X));
+	CUDA_SAFE_CALL(cudaFree(d_gamma_hat));
+	CUDA_SAFE_CALL(cudaFree(d_w));
+	CUDA_SAFE_CALL(cudaFree(d_mu));
+	CUDA_SAFE_CALL(cudaFree(d_sigma));
 
 
 	return 0;

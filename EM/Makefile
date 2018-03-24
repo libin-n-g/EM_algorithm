@@ -1,4 +1,4 @@
-LIBS=-lafcuda
+LIBS=-lafcuda -lm
 LIB_PATHS=-L/usr/local/lib
 INCLUDES=-I/usr/local/include
 NVCC=nvcc # $(COMPILER_OPTIONS)
