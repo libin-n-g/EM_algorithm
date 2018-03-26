@@ -9,7 +9,8 @@ def main():
         X, y = make_blobs(n_samples=int(sys.argv[1]), centers=int(sys.argv[3]), n_features=int(sys.argv[2]),random_state=0)
         filename="data_"+sys.argv[1]+"_"+sys.argv[2]+"_"+sys.argv[3]
         data = np.hstack((X,np.asmatrix(y).transpose()))
-        np.savetxt(filename, data, delimiter=",")
+        np.savetxt(filename, X, fmt='%f')
+        np.savetxt('labels_{}_{}_{}'.format(sys.argv[1], sys.argv[2], sys.argv[3]), data, fmt='%f')
     return
-
-main()
+if __name__ == '__main__':
+	main()
