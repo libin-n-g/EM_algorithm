@@ -6,7 +6,7 @@ import time
 
 def fit_samples(samples,n_comp):
     start_time = time.time()
-    gmix = mixture.GMM(n_components=n_comp, covariance_type='full')
+    gmix = mixture.GaussianMixture(n_components=n_comp, covariance_type='diag')
     gmix.fit(samples)
     elapsed_time = time.time() - start_time
     print(elapsed_time)
