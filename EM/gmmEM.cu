@@ -130,7 +130,7 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
  * normalize gamma
  * number of blocks => S1*QT
  * number of threads per block => M
- * gamma => unnormalized responsibilities
+ * gamma => unnormalized responsibilities M * T array
  */
 __global__ void normilize(double * gamma, double *log_like, int M, int N) {
 	int id_x = blockIdx.x * gridDim.y + blockIdx.y;
@@ -171,6 +171,32 @@ __global__ void calc_likelihood(double * gamma, double * gamma_hat, int M,
 //    		gamma[temp+j] = exp(gamma[temp+j]-(total));
 //		}
 //	}
+}
+/*
+ * eps M * D
+ * eps_sq M * D
+ * T number of points
+ * M number of components
+ * D feature dimension
+ * mu M * D (OUT)
+ * sigma M * D (OUT)
+ * w -> mixing coefficient M dimensional (OUT)
+ */
+
+__global__ void find_mu_sigma_omega(double* eps,double* eps_sq, double* gamma, int T,int M, int D,
+		double * mu, double *sigma, double *w){
+	int component = threadIdx.x;
+	double cm = 0;
+	for (int i = 0; i < T; ++i) {
+		cm = cm + gamma[T*component + i];
+	}
+	w[component] = cm / ((double)T);
+	for (int i = 0; i < D; ++i) {
+		mu[component*D + i] = eps[component*D + i] / cm;
+	}
+	for (int i = 0; i < D; ++i) {
+		sigma[D*component + i] = eps_sq[component*D + i]/ cm  - mu[component*D + i]*mu[component*D + i];
+	}
 }
 /*
  * Structure for returning data from file
@@ -251,16 +277,16 @@ int main(int argc, char **argv) {
 			cudaMemcpy(d_X, X, N * D * sizeof(double), cudaMemcpyHostToDevice));
 	/*
 	 * TODO : Make loop checking log likelihood
-	 * TODO : update mu, sigma, w from eps, eps_sq, c (it may be easily done by new kernel)
 	 * (see Fast Estimation of Gaussian Mixture Model Parameters on GPU using CUDA)
 	 * TODO : get log likelihood from d_loglike
 	 */
+
 	calc_log_gamma<<<dimBlock, QM, sizeof(float) * D * QT>>>(d_X, d_loglike,
 			d_mu, d_sigma, d_w, D, M);
 	calc_likelihood<<<S1, QT>>>(d_loglike, d_gamma, M, N);
 	normilize<<<normalize_Block, M>>>(d_gamma, d_loglike, M, N);
 	eps_kernal<<<dimBlock2, QM>>>(d_X, d_gamma, D, N, d_eps, d_eps_sq, d_c, S1);
-
+	find_mu_sigma_omega<<< 1, M>>>(d_eps, d_eps_sq, d_gamma, N, M, D, d_mu, d_sigma, d_w);
 	CUDA_SAFE_CALL(cudaFree(d_loglike));
 	CUDA_SAFE_CALL(cudaFree(d_X));
 	CUDA_SAFE_CALL(cudaFree(d_gamma));
