@@ -14,9 +14,9 @@
 #include "matrix.cuh"
 //using namespace af;
 
-#define QD 4
-#define QM 32
-#define QT 8
+#define QD 2
+#define QM 3
+#define QT 100
 
 /* S2 * S3 GRID QM threads per block
  * X => T * D Matrix of input (stored as one dimensional)
@@ -69,7 +69,7 @@ __device__ double square(double x) {
 	return x * x;
 }
 /*
- * S1 * S2 GRID
+ * S1 * S2 GRID QM threads per block
  * d -> dimension of data(feature) == D
  * X -> T * D Matrix of input (stored as one dimensional)
  * gamma -> M * N array (N -> number of data points) (responsibility )
@@ -78,6 +78,7 @@ __device__ double square(double x) {
  * sigma -> M * D dimensional array ( each row represents diagonal coefficients for each sigma)
  * w -> M dimensional array (mixing coefficient)
  * M -> number of components
+ * shared mem -> D * QT * sizeof(double)
  */
 __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 		double* sigma, double* w, int d, int M) {
@@ -86,12 +87,14 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 	 when calling the kernel */
 	int id_x = blockIdx.x;
 	// Coping to Shared Memory
-	for (int i = 0; i < QT; ++i) {
-		for (int j = 0; j < d; ++j) {
-			x[i * d + j] = X[(id_x + i) * QT + j];
+	if (threadIdx.x == 0){
+		for (int i = 0; i < QT; ++i) {
+			for (int j = 0; j < d; ++j) {
+				x[i * d + j] = X[(id_x + i) * d + j];
+			}
 		}
 	}
-
+	__syncthreads();
 	int i, j;
 	double total;
 
@@ -105,13 +108,12 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 		det = det * sigma[d * m + i];
 	}
 	// log(2*pi)*0.5 = 0.399089934
-	double Gm = log(w[m]) + 0.399089934 * d + 0.5 * log(det);
+	double Gm = log(w[m]) + 0.399089934 * d + 0.5 * log(det); // to avoid zero
 	__syncthreads();
-
 	for (i = 0; i < QT; i++) {
 		gamma_[i] = Gm;
 	}
-
+	int N = gridDim.x * QT;
 	for (i = 0; i < QT; i++) {
 		total = 0;
 		for (j = 0; j < d; j++) {
@@ -122,7 +124,8 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 		gamma_[i] = gamma_[i] + total;
 	}
 	for (int k = 0; k < QT; ++k) {
-		gamma_hat[m * QM + k] = gamma_[k];
+//		printf("%lf %d\n", gamma_[k], m * N + k + blockIdx.x*QT);
+		gamma_hat[m * N + k + blockIdx.x*QT] = gamma_[k];
 	}
 }
 
@@ -131,15 +134,18 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
  * number of blocks => S1*QT
  * number of threads per block => M
  * gamma => unnormalized responsibilities M * T array
+ * log_like => T dimensional array containing sum of gamma
  */
 __global__ void normilize(double * gamma, double *log_like, int M, int N) {
 	int id_x = blockIdx.x * gridDim.y + blockIdx.y;
 	int j = threadIdx.x;
-	gamma[j * M + id_x] = exp(gamma[id_x + j * M] - log_like[j]);
+//	printf("gamma before %lf %lf %d % d \n", gamma[id_x + j * M],log_like[id_x], j , id_x  );
+	gamma[j * M + id_x] = exp(gamma[id_x + j * M] - log_like[id_x]);
+//	printf("gamma %lf %d %d %lf \n", gamma[j * M + id_x], j , id_x, gamma[id_x + j * M] - log_like[id_x]);
 }
 /*
  * QT*S1 => Number of blocks
- * number of threads => M
+ * number of threads => 1
  * M => number of components
  * N => number of points
  * gamma => N length array of log likelihoods
@@ -148,19 +154,15 @@ __global__ void normilize(double * gamma, double *log_like, int M, int N) {
 __global__ void calc_likelihood(double * gamma, double * gamma_hat, int M,
 		int N) {
 	int id_x = blockIdx.y * gridDim.x + blockIdx.x;
-	__shared__ double total;
-	// coping to shared memory
-	if (threadIdx.x == 0) {
-		total = 0;
-	}
-	__syncthreads();
+	double total;
 	if (id_x < N) {
-		total = total + exp(gamma_hat[M * threadIdx.x + id_x]);
-	}
-	__syncthreads();
-	if (threadIdx.x == 0) {
+		total = 0;
+		for (int i = 0; i < M; ++i) {
+			total += exp(gamma_hat[M * i + id_x]);
+		}
 		gamma[id_x] = log(total);
 	}
+
 //	for (int i = 0; i < QT; ++i) {
 //		total=0;
 //		//temp=id_x*QT*M+M*i;
@@ -242,7 +244,7 @@ struct Inputdata read_file(const char* file_name, int n, int d) {
  * <input filename>  <number of clusters>
  */
 int main(int argc, char **argv) {
-	double X[5000][50];
+
 	check(argc > 1, "Please give Input Filename as first argument \n");
 	check(argc > 2, "Please give number of points as second argument \n");
 	check(argc > 3,
@@ -254,16 +256,26 @@ int main(int argc, char **argv) {
 	int M = atoi(argv[4]);
 	//File processing
 	struct Inputdata input = read_file(argv[1], N, D);
-
+	bool end = false;
 	double *d_loglike, *d_X, *d_gamma, *d_w, *d_sigma, *d_mu, *d_c, *d_eps,
 			*d_eps_sq;
+	double *loglike;
+	double *X;
+	X = input.X;
+	loglike = (double *)calloc(N * M, sizeof(double));
+	check(loglike, "Unable to allocate MAIN MEMORY (RAM CPU)");
+	double old_log_like = 0;
 	int S1 = ceil(N * 1.0 / QT);
 	int S2 = ceil(M * 1.0 / QM);
 	int S3 = ceil(D * 1.0 / QD);
+	//printf("%d", S1);
+	int iteration = 0;
+	int max_iteratation = 1;
+	int threshhold = 0.0001;
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_c, sizeof(double) * M));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_eps, sizeof(double) * M));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_eps_sq, sizeof(double) * M));
-	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_loglike, sizeof(double) * N * M));
+	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_loglike, sizeof(double) * N));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_X, N * D * sizeof(double)));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_gamma, N * M * sizeof(double)));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_w, M * sizeof(double)));
@@ -275,18 +287,52 @@ int main(int argc, char **argv) {
 	dim3 normalize_Block(S1, QT);
 	CUDA_SAFE_CALL(
 			cudaMemcpy(d_X, X, N * D * sizeof(double), cudaMemcpyHostToDevice));
-	/*
-	 * TODO : Make loop checking log likelihood
-	 * (see Fast Estimation of Gaussian Mixture Model Parameters on GPU using CUDA)
-	 * TODO : get log likelihood from d_loglike
-	 */
-
-	calc_log_gamma<<<dimBlock, QM, sizeof(float) * D * QT>>>(d_X, d_loglike,
-			d_mu, d_sigma, d_w, D, M);
-	calc_likelihood<<<S1, QT>>>(d_loglike, d_gamma, M, N);
-	normilize<<<normalize_Block, M>>>(d_gamma, d_loglike, M, N);
-	eps_kernal<<<dimBlock2, QM>>>(d_X, d_gamma, D, N, d_eps, d_eps_sq, d_c, S1);
-	find_mu_sigma_omega<<< 1, M>>>(d_eps, d_eps_sq, d_gamma, N, M, D, d_mu, d_sigma, d_w);
+	double new_log = 0;
+	double * mu, *sigma, *w;
+	mu = (double *)calloc(M * D, sizeof(double));
+	check(mu, "Unable to allocate MAIN MEMORY (CPU)");
+	sigma = (double *)calloc(M * D, sizeof(double));
+	check(sigma, "Unable to allocate MAIN MEMORY (CPU)");
+	w = (double *)calloc(M , sizeof(double));
+	check(w, "Unable to allocate MAIN MEMORY (CPU)");
+	for (int i = 0; i < M*D; ++i) {
+		mu[i] = (double)rand()/1000;
+		sigma[i] = (double)rand()/1000;
+	}
+	for (int i = 0; i < M; ++i) {
+		w[i] = 1/(double)M;
+	}
+	CUDA_SAFE_CALL(
+				cudaMemcpy(d_mu, mu, M * D * sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(
+				cudaMemcpy(d_sigma, sigma, M * D * sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(
+				cudaMemcpy(d_w, w, M * sizeof(double), cudaMemcpyHostToDevice));
+	dim3 dimLike(QT, S1);
+	while(!(end)){
+		calc_log_gamma<<<dimBlock, QM, sizeof(double) * D * QT >>>(d_X, d_gamma,
+				d_mu, d_sigma, d_w, D, M);
+		calc_likelihood<<<dimLike , 1 >>>(d_loglike, d_gamma, M, N);
+		normilize<<<normalize_Block, M>>>(d_gamma, d_loglike, M, N);
+		eps_kernal<<<dimBlock2, QM>>>(d_X, d_gamma, D, N, d_eps, d_eps_sq, d_c, S1);
+		find_mu_sigma_omega<<< 1, M>>>(d_eps, d_eps_sq, d_gamma, N, M, D, d_mu, d_sigma, d_w);
+		CUDA_SAFE_CALL(
+					cudaMemcpy(loglike, d_loglike, N * sizeof(double), cudaMemcpyDeviceToHost));
+		new_log = 0;
+		for (int i = 0; i < N; ++i) {
+			new_log = new_log + loglike[i];
+			//printf("%lf \n ", loglike[i]);
+		}
+		if ((abs(new_log - old_log_like)) < threshhold){
+			end = true;
+		}
+		if (iteration >= max_iteratation){
+			end = true;
+		}
+		iteration ++;
+		old_log_like = new_log;
+		printf("iteration %d log = %lf \n", iteration, new_log);
+	}
 	CUDA_SAFE_CALL(cudaFree(d_loglike));
 	CUDA_SAFE_CALL(cudaFree(d_X));
 	CUDA_SAFE_CALL(cudaFree(d_gamma));
