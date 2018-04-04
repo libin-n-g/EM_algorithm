@@ -124,8 +124,9 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 		gamma_[i] = gamma_[i] + total;
 	}
 	for (int k = 0; k < QT; ++k) {
-//		printf("%lf %d\n", gamma_[k], m * N + k + blockIdx.x*QT);
 		gamma_hat[m * N + k + blockIdx.x*QT] = gamma_[k];
+//		printf("%lf %d %d %d\n", gamma_hat[m * N + k + blockIdx.x*QT], m ,
+//				k + blockIdx.x*QT, m * N + k + blockIdx.x*QT);
 	}
 }
 
@@ -139,9 +140,10 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 __global__ void normilize(double * gamma, double *log_like, int M, int N) {
 	int id_x = blockIdx.x * gridDim.y + blockIdx.y;
 	int j = threadIdx.x;
-//	printf("gamma before %lf %lf %d % d \n", gamma[id_x + j * M],log_like[id_x], j , id_x  );
-	gamma[j * M + id_x] = exp(gamma[id_x + j * M] - log_like[id_x]);
-//	printf("gamma %lf %d %d %lf \n", gamma[j * M + id_x], j , id_x, gamma[id_x + j * M] - log_like[id_x]);
+//	printf("gamma before %lf %lf %d % d %lf\n", gamma[id_x + j * N],log_like[id_x], j ,
+//			id_x, gamma[id_x + j * N] - log_like[id_x]  );
+	gamma[j * N + id_x] = exp(gamma[id_x + j * N] - log_like[id_x]);
+//	printf("gamma %lf %lf %d %d \n", gamma[j * N + id_x], log_like[id_x],  j , id_x);
 }
 /*
  * QT*S1 => Number of blocks
@@ -158,7 +160,8 @@ __global__ void calc_likelihood(double * gamma, double * gamma_hat, int M,
 	if (id_x < N) {
 		total = 0;
 		for (int i = 0; i < M; ++i) {
-			total += exp(gamma_hat[M * i + id_x]);
+//			printf(" calc %lf %d %d \n", gamma_hat[M * i + id_x], i, id_x);
+			total += exp(gamma_hat[N * i + id_x]);
 		}
 		gamma[id_x] = log(total);
 	}
@@ -175,6 +178,7 @@ __global__ void calc_likelihood(double * gamma, double * gamma_hat, int M,
 //	}
 }
 /*
+ * 1 block M threads
  * eps M * D
  * eps_sq M * D
  * T number of points
@@ -185,13 +189,13 @@ __global__ void calc_likelihood(double * gamma, double * gamma_hat, int M,
  * w -> mixing coefficient M dimensional (OUT)
  */
 
-__global__ void find_mu_sigma_omega(double* eps,double* eps_sq, double* gamma, int T,int M, int D,
+__global__ void find_mu_sigma_omega(double *c, double* eps,double* eps_sq, double* gamma, int T,int M, int D,
 		double * mu, double *sigma, double *w){
 	int component = threadIdx.x;
-	double cm = 0;
-	for (int i = 0; i < T; ++i) {
-		cm = cm + gamma[T*component + i];
-	}
+	double cm = c[component];
+//	for (int i = 0; i < T; ++i) {
+//		cm = cm + gamma[T*component + i];
+//	}
 	w[component] = cm / ((double)T);
 	for (int i = 0; i < D; ++i) {
 		mu[component*D + i] = eps[component*D + i] / cm;
@@ -315,7 +319,8 @@ int main(int argc, char **argv) {
 		calc_likelihood<<<dimLike , 1 >>>(d_loglike, d_gamma, M, N);
 		normilize<<<normalize_Block, M>>>(d_gamma, d_loglike, M, N);
 		eps_kernal<<<dimBlock2, QM>>>(d_X, d_gamma, D, N, d_eps, d_eps_sq, d_c, S1);
-		find_mu_sigma_omega<<< 1, M>>>(d_eps, d_eps_sq, d_gamma, N, M, D, d_mu, d_sigma, d_w);
+		find_mu_sigma_omega<<< 1, M>>>(d_c, d_eps, d_eps_sq, d_gamma, N, M,
+				D, d_mu, d_sigma, d_w);
 		CUDA_SAFE_CALL(
 					cudaMemcpy(loglike, d_loglike, N * sizeof(double), cudaMemcpyDeviceToHost));
 		new_log = 0;
