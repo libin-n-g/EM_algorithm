@@ -3,8 +3,9 @@
 Created on Sat May  3 10:21:21 2014
 @author: umb
 """
-
+from sklearn.cluster import KMeans
 import numpy as np
+import time
     
 class GMM:
     
@@ -15,15 +16,19 @@ class GMM:
         # All parameters from fitting/learning are kept in a named tuple
         from collections import namedtuple
     
-    def fit_EM(self, X, max_iters = 1000):
+    def fit_EM(self, X, max_iters = 1000, rand_means=True):
         
         # n = number of data-points, d = dimension of data points        
         n, d = X.shape
-        
-        # randomly choose the starting centroids/means 
-        ## as 3 of the points from datasets        
-        mu = X[np.random.choice(n, self.k, False), :]
-        
+        start = time.time()
+        if(rand_means):
+            # randomly choose the starting centroids/means 
+            ## as 3 of the points from datasets        
+            mu = X[np.random.choice(n, self.k, False), :]
+        else:
+            kmeans = KMeans(n_clusters=self.k, random_state=0, max_iter=10).fit(X)
+            mu = kmeans.cluster_centers_
+
         # initialize the covariance matrices for each gaussians
         Sigma= [np.eye(d)] * self.k
         
@@ -81,6 +86,8 @@ class GMM:
             if len(log_likelihoods) < 2 : continue
             if np.abs(log_likelihood - log_likelihoods[-2]) < self.eps: break
         
+        stop = time.time()
+        print("time:",stop-start,"\nrandom means:",rand_means)
         ## bind all results together
         from collections import namedtuple
         self.params = namedtuple('params', ['mu', 'Sigma', 'w', 'log_likelihoods', 'num_iters'])
@@ -115,21 +122,22 @@ def demo_2d():
     #X = np.genfromtxt('data1.csv', delimiter=',')
     ### generate the random data     
     np.random.seed(3)
-    m1, cov1 = [9, 8], [[.5, 1], [.25, 1]] ## first gaussian
-    data1 = np.random.multivariate_normal(m1, cov1, 90)
+    m1, cov1 = [7, 9], [[.9, 1], [.5, 1]] ## first gaussian
+    data1 = np.random.multivariate_normal(m1, cov1, 900)
     
-    m2, cov2 = [6, 13], [[.5, -.5], [-.5, .1]] ## second gaussian
-    data2 = np.random.multivariate_normal(m2, cov2, 45)
+    m2, cov2 = [6, 13], [[.75, -.5], [-.5, .4]] ## second gaussian
+    data2 = np.random.multivariate_normal(m2, cov2, 450)
     
-    m3, cov3 = [4, 7], [[0.25, 0.5], [-0.1, 0.5]] ## third gaussian
-    data3 = np.random.multivariate_normal(m3, cov3, 65)
+    m3, cov3 = [4, 7], [[0.35, 0.5], [-0.1, 0.6]] ## third gaussian
+    data3 = np.random.multivariate_normal(m3, cov3, 650)
     X = np.vstack((data1,np.vstack((data2,data3))))
     np.random.shuffle(X)
 #    np.savetxt('sample.csv', X, fmt = "%.4f",  delimiter = ",")
     ####
     gmm = GMM(3, 0.000001)
     params = gmm.fit_EM(X, max_iters= 100)
-    print params.log_likelihoods
+    params1 = gmm.fit_EM(X, max_iters= 100,rand_means=False)
+    print (params.log_likelihoods)
     import pylab as plt    
     from matplotlib.patches import Ellipse
     
@@ -171,7 +179,7 @@ def demo_2d():
     plt.xlabel('Iterations')
     plt.ylabel('log likelihood')
     plt.show()
-    print gmm.predict(np.array([1, 2]))
+    print( gmm.predict(np.array([1, 2])))
        
 
 if __name__ == "__main__":
@@ -203,9 +211,9 @@ if __name__ == "__main__":
         max_iters = 1000
     else: eps = int(options.maxiters)
     
-    X = np.genfromtxt(options.filepath, delimiter=',')
+    X = np.genfromtxt(options.filepath, delimiter=' ')
     gmm = GMM(k, eps)
     params = gmm.fit_EM(X, max_iters)
-    print params.log_likelihoods
+    print (params.log_likelihoods)
     gmm.plot_log_likelihood()
-print gmm.predict(np.array([1, 2]))
+print (gmm.predict(np.array([1, 2])))
