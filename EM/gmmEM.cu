@@ -16,8 +16,8 @@
 //using namespace af;
 
 #define QD 2
-#define QM 3
-#define QT 100
+#define QM 2
+#define QT 10
 
 __device__ double square(double x) {
 	return x * x;
@@ -91,12 +91,13 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 	extern __shared__ double x[];
 	/* memory size should be give as 3rd parameter
 	 when calling the kernel */
-	int id_x = blockIdx.x;
+	int id_x = blockIdx.x * QT;
 	// Coping to Shared Memory
 	if (threadIdx.x == 0){
 		for (int i = 0; i < QT; ++i) {
 			for (int j = 0; j < d; ++j) {
 				x[i * d + j] = X[(id_x + i) * d + j];
+//				printf("%d %d %d (%d, %d) \n", (id_x + i), j, threadIdx.x, blockIdx.x, blockIdx.y);
 			}
 		}
 	}
@@ -112,6 +113,7 @@ __global__ void calc_log_gamma(double * X, double * gamma_hat, double* mu,
 	double det = 1;
 	for (int i = 0; i < d; ++i) {
 		det = det * sigma[d * m + i];
+//		printf("%lf \n", sigma[d * m + i]);
 	}
 //	printf("w det %lf %lf \n", w[m], det);
 	// log(2*pi)*0.5 = 0.399089934
@@ -169,7 +171,9 @@ __global__ void calc_likelihood(double * gamma, double * gamma_hat, int M,
 		for (int i = 0; i < M; ++i) {
 //			printf(" calc %lf %d %d \n", gamma_hat[M * i + id_x], i, id_x);
 			total += exp(gamma_hat[N * i + id_x]);
+//			printf("qw %lf \t", exp(gamma_hat[N * i + id_x]));
 		}
+//		printf("t %lf \n", total);
 		gamma[id_x] = log(total);
 	}
 
@@ -209,7 +213,7 @@ __global__ void find_mu_sigma_omega(double *c, double* eps,double* eps_sq,
 		mu[component*D + i] = eps[component*D + i] / cm;
 	}
 	for (int i = 0; i < D; ++i) {
-		sigma[D*component + i] = eps_sq[component*D + i]/ cm  - mu[component*D + i]*mu[component*D + i];
+		sigma[D*component + i] = eps_sq[component*D + i]/ cm  - square(mu[component*D + i]);
 	}
 }
 /*
@@ -251,12 +255,13 @@ struct Inputdata read_file(const char* file_name, int n, int d) {
 	fclose(file);
 	return ret;
 }
-void write_file(double* mu,double* sigma,double* w,double* respon, int N, int D, int M)
+void write_file(double* mu,double* sigma,double* w,double* respon, int N, int D, int M, double timetaken)
 {
 	FILE* f1 = fopen("parameters.txt", "w");
 	check(f1, "File parameters.txt could not be created \n");
 	FILE* f2 = fopen("respon.txt", "w");
 	check(f2, "File respon.txt could not be opened \n");
+	fprintf(f1, "Time taken %lf\n", timetaken);
 	fprintf(f2, "Responsibility matrix (each component forms each row and each column forms each point )\n");
 	for (int i = 0; i < M; ++i) {
 		fprintf(f1, "mixing coefficient of component %d \n", i);
@@ -305,14 +310,14 @@ int main(int argc, char **argv) {
 	X = input.X;
 	loglike = (double *)calloc(N , sizeof(double));
 	check(loglike, "Unable to allocate MAIN MEMORY (RAM CPU)");
-	double old_log_like = 0;
+	double old_log_like = 1;
 	int S1 = ceil(N * 1.0 / QT);
 	int S2 = ceil(M * 1.0 / QM);
 	int S3 = ceil(D * 1.0 / QD);
 	//printf("%d", S1);
 	int iteration = 0;
-	int max_iteratation = 30;
-	double threshhold = 10;
+	int max_iteratation = 300;
+	double threshhold = 0.01;
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_c, sizeof(double) * M));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_eps, sizeof(double) * M));
 	CUDA_SAFE_CALL(cudaMalloc((void ** )&d_eps_sq, sizeof(double) * M));
@@ -341,13 +346,20 @@ int main(int argc, char **argv) {
 	check(respon, "Unable to allocate MAIN MEMORY (CPU)");
 	pred = (int *)calloc(N , sizeof(int));
 	check(respon, "Unable to allocate MAIN MEMORY (CPU)");
+	int t;
 	for (int i = 0; i < M; ++i) {
+		t = rand() % N;
 		for (int j = 0; j < D; ++j) {
-			mu[i] = X[(rand() % N)*D + j];
+			mu[i * D + j] = X[t*D + j];
 		}
 	}
-	for (int i = 0; i < M * D; ++i) {
-		sigma[i] = rand() % 10;
+	int t2;
+	for (int i = 0; i < M; ++i) {
+		t = rand()  % N;
+		t2 = rand()  % N;
+		for (int j = 0; j < D; ++j) {
+			sigma[i * D + j] = X[t*D + j] - X [t2*D + j];
+		}
 	}
 	for (int i = 0; i < M; ++i) {
 		w[i] = 1/(double)M;
@@ -412,8 +424,8 @@ int main(int argc, char **argv) {
 				maxi = respon[j*N+i];
 			}
 		}
-		printf("\npred %d %d \n ",i,pred[i]);
+		printf("\npred %d %d",i,pred[i]);
 	}
-	write_file(mu, sigma, w, respon, N, D, M);
+	write_file(mu, sigma, w, respon, N, D, M, (double)(stop-start)/CLOCKS_PER_SEC);
 	return 0;
 }
