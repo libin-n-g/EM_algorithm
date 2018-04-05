@@ -12,6 +12,7 @@
 #include <cuda.h>
 #include "common.h"
 #include "matrix.cuh"
+#include <time.h>
 //using namespace af;
 
 #define QD 2
@@ -250,6 +251,34 @@ struct Inputdata read_file(const char* file_name, int n, int d) {
 	fclose(file);
 	return ret;
 }
+void write_file(double* mu,double* sigma,double* w,double* respon, int N, int D, int M)
+{
+	FILE* f1 = fopen("parameters.txt", "w");
+	check(f1, "File parameters.txt could not be created \n");
+	FILE* f2 = fopen("respon.txt", "w");
+	check(f2, "File respon.txt could not be opened \n");
+	fprintf(f2, "Responsibility matrix (each component forms each row and each column forms each point )\n");
+	for (int i = 0; i < M; ++i) {
+		fprintf(f1, "mixing coefficient of component %d \n", i);
+		fprintf(f1,"%lf\n" ,w[i]);
+		fprintf(f1, "sigma(diagonal) of component %d \n", i);
+		for (int j = 0; j < D; ++j) {
+			fprintf(f1,"%lf\t" ,sigma[i*D+j]);
+		}
+		fprintf(f1, "\n");
+		fprintf(f1, "mu of component %d \n", i);
+		for (int j = 0; j < D; ++j) {
+			fprintf(f1,"%lf\t" ,mu[i*D+j]);
+		}
+		fprintf(f1, "\n");
+		for (int k = 0; k < N; ++k) {
+			fprintf(f2,"%lf\t" ,respon[i*N+k]);
+		}
+		fprintf(f2, "\n");
+	}
+	fclose(f1);
+	fclose(f2);
+}
 /*
  * Format of argv
  * <input filename>  <number of clusters>
@@ -272,6 +301,7 @@ int main(int argc, char **argv) {
 			*d_eps_sq;
 	double *loglike;
 	double *X;
+	clock_t start,stop;
 	X = input.X;
 	loglike = (double *)calloc(N , sizeof(double));
 	check(loglike, "Unable to allocate MAIN MEMORY (RAM CPU)");
@@ -329,6 +359,7 @@ int main(int argc, char **argv) {
 	CUDA_SAFE_CALL(
 				cudaMemcpy(d_w, w, M * sizeof(double), cudaMemcpyHostToDevice));
 	dim3 dimLike(QT, S1);
+	start = clock();
 	while(!(end)){
 		calc_log_gamma<<<dimBlock, QM, sizeof(double) * D * QT >>>(d_X, d_gamma,
 				d_mu, d_sigma, d_w, D, M);
@@ -354,6 +385,8 @@ int main(int argc, char **argv) {
 		old_log_like = new_log;
 		printf("iteration %d log = %lf \n", iteration, new_log);
 	}
+	stop = clock();
+	printf("time %lf \n ", (double)(stop-start)/CLOCKS_PER_SEC);
 	CUDA_SAFE_CALL(
 		cudaMemcpy(w, d_w, M * sizeof(double), cudaMemcpyDeviceToHost));
 	CUDA_SAFE_CALL(
@@ -381,5 +414,6 @@ int main(int argc, char **argv) {
 		}
 		printf("\npred %d %d \n ",i,pred[i]);
 	}
+	write_file(mu, sigma, w, respon, N, D, M);
 	return 0;
 }
