@@ -1,0 +1,25 @@
+Time taken 0.024209
+mixing coefficient of component 0 
+0.249745
+sigma(diagonal) of component 0 
+3.077050	7.474569	
+mu of component 0 
+0.034626	3.978514	
+mixing coefficient of component 1 
+0.250075
+sigma(diagonal) of component 1 
+3.071514	7.488946	
+mu of component 1 
+0.034299	3.972030	
+mixing coefficient of component 2 
+0.250031
+sigma(diagonal) of component 2 
+3.074224	7.482587	
+mu of component 2 
+0.034521	3.974937	
+mixing coefficient of component 3 
+0.250161
+sigma(diagonal) of component 3 
+3.072183	7.488870	
+mu of component 3 
+0.034365	3.972314	
