@@ -1,6 +1,6 @@
 # EM_algorithm
 
-This is a implementation of EM for GMM Classificaion
+This is a implementation of EM for GMM Classificaion using CUDA (Parallel Processing)
 This Project was done as a part of **Data Science** under the guidance of Dr. Mrinal Kanti Das
 `nvcc matrix_cuda.cu ` to compile the file  
 
