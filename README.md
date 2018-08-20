@@ -10,6 +10,6 @@ This Project was done as a part of **Data Science** under the guidance of Dr. Mr
  - Mregank Soni
  - Navjot Singh
 
-# References
-[k_means](http://www.goldsborough.me/c++/python/cuda/2017/09/10/20-32-46-exploring_k-means_in_python,_c++_and_cuda/)
-[Massively Parallel Expectation Maximization Using Graphics Processing Units](http://chbrown.github.io/kdd-2013-usb/kdd/p838.pdf)
+# References 
+ - [k_means](http://www.goldsborough.me/c++/python/cuda/2017/09/10/20-32-46-exploring_k-means_in_python,_c++_and_cuda/)
+ - [Massively Parallel Expectation Maximization Using Graphics Processing Units](http://chbrown.github.io/kdd-2013-usb/kdd/p838.pdf)
